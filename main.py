@@ -395,5 +395,3 @@ if __name__ == "__main__":
 
 # start : streamlit run app.py
 # stop : ctrl + c
-
-모델 claude로 바꾸는 코드 작성해줘
