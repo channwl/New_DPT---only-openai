@@ -104,7 +104,7 @@ def main():
     st.title("🎓 디지털경영전공 챗봇")
     st.caption("여러분의 학과 관련 궁금증을 빠르게 해결해드립니다!")
 
-    if st.button("📥 (관리자 전용) 인덱스 다시 생성하기"):
+    if st.button("📥 채팅 시작 !"):
         generate_faiss_index()
 
     if "messages" not in st.session_state:
@@ -115,8 +115,8 @@ def main():
     with left_col:
         st.subheader("📚 사용 가이드")
         st.markdown("""
-        - 궁금한 점을 입력하세요.<br>
-        - 답변을 확인해 보세요.<br>
+        - 채팅 시작! 버튼을 눌러주세요.<br>
+        - 궁금한 점에 대해서 물어보세요 !.<br>
         - 추가 문의는 디지털경영전공 홈페이지나 학과 사무실(044-860-1560)로 문의해 주세요.
         """, unsafe_allow_html=True)
 
