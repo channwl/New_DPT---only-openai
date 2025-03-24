@@ -87,11 +87,11 @@ class RAGSystem:
         return chain.invoke({"question": question, "context": context_docs})
 
 # 피드백 저장 함수
-def save_feedback(feedback_text, rating):
-    if feedback_text.strip() != "" or rating > 0:
+def save_feedback(feedback_text):
+    if feedback_text.strip() != "":
         with open("feedback_log.csv", mode="a", encoding="utf-8-sig", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), rating, feedback_text])
+            writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), feedback_text])
         return True
     return False
 
@@ -112,14 +112,7 @@ def main():
 
     with left_column:
         st.subheader("📚 사용 가이드")
-        st.markdown("""1. 질문을 입력해 주세요.<br>2. 답변을 확인하고 추가 질문도 가능해요.<br>3. 필요 시 오른쪽에서 피드백 남겨주세요!""", unsafe_allow_html=True)
-        st.subheader("📂 PDF 목록")
-        pdf_files = [file for file in os.listdir("data/") if file.endswith(".pdf")]
-        if pdf_files:
-            for file in pdf_files:
-                st.markdown(f"✅ {file}")
-        else:
-            st.info("현재 등록된 PDF 파일이 없습니다.")
+        st.markdown("""1. 궁금한 내용을 입력해 주세요.<br>2. 답변을 확인하고 추가 질문도 해보세요.<br>3. 추가 문의 사항은 디지털경영전공 홈페이지를 참고하거나, 디지털경영전공 사무실(044-860-1560)에 전화하여 문의사항을 접수하세요.""", unsafe_allow_html=True)
 
     with mid_column:
         for msg in st.session_state.messages:
@@ -173,14 +166,13 @@ def main():
                 for i, q in enumerate(st.session_state.user_questions, 1):
                     st.markdown(f"{i}. {q}")
 
-        st.subheader("🌟 만족도 피드백")
-        rating = st.slider("별점으로 만족도를 남겨주세요", min_value=0, max_value=5, step=1, format="%d⭐")
+        st.subheader("📢 피드백 남기기")
         feedback_input = st.text_area("개발자에게 전하고 싶은 말을 적어주세요!")
         if st.button("피드백 제출"):
-            if save_feedback(feedback_input, rating):
+            if save_feedback(feedback_input):
                 st.success("피드백이 제출되었습니다! 감사합니다.")
             else:
-                st.warning("별점 또는 의견을 입력해 주세요.")
+                st.warning("피드백 내용을 입력해 주세요.")
 
         if st.session_state.messages:
             chat_log = "역할,내용\n"
