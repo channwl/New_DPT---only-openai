@@ -166,7 +166,7 @@ def main():
                 answer = rag_system.process_question(prompt)
 
             st.session_state.messages.append({"role": "assistant", "content": answer})
-            st.experimental_rerun()
+            st.rerun()
 
     with right_column:
         st.subheader("📝 질문 히스토리")
