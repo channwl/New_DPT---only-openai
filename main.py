@@ -24,26 +24,36 @@ openai.api_key = st.secrets["openai"]["API_KEY"]
 api_key = openai.api_key
 
 # 배경 및 커스텀 CSS 적용
-st.markdown("""
-    <style>
-    body {
-        background-color: #f7f7f8;
-    }
-    .user-msg {
-        background-color: #fbe8ed;
-        border: 2px solid #dc143c;
-        padding: 10px;
-        border-radius: 10px;
-        margin-bottom: 10px;
-    }
-    .chat-history {
-        background-color: white;
-        padding: 10px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    </style>
-""", unsafe_allow_html=True)
+for msg in st.session_state.messages:
+    if msg["role"] == "user":
+        st.markdown(f'''
+            <div style="
+                background-color: #fbe8ed; 
+                border: 2px solid #dc143c; 
+                padding: 10px; 
+                border-radius: 12px; 
+                margin-bottom: 10px;
+                width: fit-content;
+                max-width: 80%;
+            ">
+            🧑‍🎓 {msg["content"]}
+            </div>
+        ''', unsafe_allow_html=True)
+    else:
+        st.markdown(f'''
+            <div style="
+                background-color: #f1f3f4; 
+                border: 1px solid #d1d1d1; 
+                padding: 10px; 
+                border-radius: 12px; 
+                margin-bottom: 10px;
+                width: fit-content;
+                max-width: 80%;
+            ">
+            🤖 {msg["content"]}
+            </div>
+        ''', unsafe_allow_html=True)
+
 
 # PDF 처리 클래스
 class PDFProcessor:
