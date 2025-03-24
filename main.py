@@ -23,19 +23,6 @@ time.sleep(1)
 openai.api_key = st.secrets["openai"]["API_KEY"]
 api_key = openai.api_key
 
-# 🔎 PDF는 프로젝트 폴더 내 'data' 폴더에 넣으세요!
-# 예시:
-# project/
-# ├─ app.py
-# ├─ data/
-# │   ├─ department_info1.pdf
-# │   ├─ department_info2.pdf
-# │   ├─ ... (총 8개 PDF 전부 이 안에!)
-# ├─ faiss_index_internal/  (자동 생성됨)
-# │   ├─ index.faiss
-# │   └─ index.pkl
-# └─ feedback_log.csv
-
 # PDF 인덱스 생성 스크립트 (한 번만 실행)
 def generate_faiss_index():
     pdf_dir = "data/"
@@ -87,7 +74,7 @@ class RAGSystem:
         return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
 
     def get_rag_chain(self) -> Runnable:
-        template = """질문: {question}\n\n컨텍스트: {context}\n\n답변:"""
+        template = """질문: {question}\n\n컨텍스트: {context}\n\n답변 (마지막에 '추가로 궁금하신 점이 있다면 편하게 물어봐 주세요 😊'로 마무리하세요):"""
         prompt = PromptTemplate.from_template(template)
         model = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
         return prompt | model | StrOutputParser()
@@ -100,11 +87,11 @@ class RAGSystem:
         return chain.invoke({"question": question, "context": context_docs})
 
 # 피드백 저장 함수
-def save_feedback(feedback_text):
-    if feedback_text.strip() != "":
+def save_feedback(feedback_text, rating):
+    if feedback_text.strip() != "" or rating > 0:
         with open("feedback_log.csv", mode="a", encoding="utf-8-sig", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), feedback_text])
+            writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), rating, feedback_text])
         return True
     return False
 
@@ -115,54 +102,65 @@ def main():
     if "user_questions" not in st.session_state:
         st.session_state.user_questions = []
 
-    st.title("💬 디지털경영전공 AI 챗봇")
-    st.caption("사전 구축된 인덱스를 사용하여 빠른 PDF 기반 상담 지원")
+    st.title("🎓 디지털경영전공 AI 챗봇")
+    st.caption("PDF 자료 기반으로 빠르게 학과 정보를 알려드려요!")
 
     if st.button("📥 (관리자) 인덱스 다시 생성하기"):
         generate_faiss_index()
 
     left_column, mid_column, right_column = st.columns([1.2, 2.5, 1.3])
 
+    with left_column:
+        st.subheader("📚 사용 가이드")
+        st.markdown("""1. 질문을 입력해 주세요.<br>2. 답변을 확인하고 추가 질문도 가능해요.<br>3. 필요 시 오른쪽에서 피드백 남겨주세요!""", unsafe_allow_html=True)
+        st.subheader("📂 PDF 목록")
+        pdf_files = [file for file in os.listdir("data/") if file.endswith(".pdf")]
+        if pdf_files:
+            for file in pdf_files:
+                st.markdown(f"✅ {file}")
+        else:
+            st.info("현재 등록된 PDF 파일이 없습니다.")
+
     with mid_column:
         for msg in st.session_state.messages:
             if msg["role"] == "user":
                 st.markdown(f'''
                     <div style="
-                        background-color: #fbe8ed;
-                        border: 2px solid #dc143c;
-                        padding: 10px;
-                        border-radius: 15px;
+                        background-color: #e9f5ff;
+                        padding: 12px;
+                        border-radius: 20px;
                         margin-bottom: 10px;
-                        max-width: 60%;
+                        max-width: 65%;
                         text-align: left;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
                     ">
-                    🧑‍🎓 {msg["content"]}
+                    💬 <b>질문:</b> {msg["content"]}
                     </div>
                 ''', unsafe_allow_html=True)
             else:
                 st.markdown(f'''
                     <div style="
-                        background-color: #f1f3f4;
-                        border: 1px solid #cccccc;
-                        padding: 10px;
-                        border-radius: 15px;
+                        background-color: #f8f8f8;
+                        padding: 12px;
+                        border-radius: 20px;
                         margin-bottom: 10px;
                         margin-left: auto;
-                        max-width: 60%;
+                        max-width: 65%;
                         text-align: left;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
                     ">
-                    🤖 {msg["content"]}
+                    🤖 <b>답변:</b> {msg["content"]}
                     </div>
                 ''', unsafe_allow_html=True)
 
-        prompt = st.chat_input("질문을 입력해 주세요.")
+        prompt = st.chat_input("궁금한 점을 입력해 주세요!")
 
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.session_state.user_questions.append(prompt)
 
             rag_system = RAGSystem(api_key)
-            with st.spinner("답변 생성 중..."):
+            with st.spinner("질문을 이해하는 중이에요! 잠시만 기다려주세요 😊"):
                 answer = rag_system.process_question(prompt)
 
             st.session_state.messages.append({"role": "assistant", "content": answer})
@@ -171,17 +169,18 @@ def main():
     with right_column:
         st.subheader("📝 질문 히스토리")
         if st.session_state.user_questions:
-            with st.expander("질문 목록"):
+            with st.expander("지금까지 질문한 내용"):
                 for i, q in enumerate(st.session_state.user_questions, 1):
                     st.markdown(f"{i}. {q}")
 
-        st.subheader("📢 피드백 남기기")
-        feedback_input = st.text_area("챗봇에 대한 의견을 남겨주세요!")
+        st.subheader("🌟 만족도 피드백")
+        rating = st.slider("별점으로 만족도를 남겨주세요", min_value=0, max_value=5, step=1, format="%d⭐")
+        feedback_input = st.text_area("개발자에게 전하고 싶은 말을 적어주세요!")
         if st.button("피드백 제출"):
-            if save_feedback(feedback_input):
-                st.success("피드백이 제출되었습니다!")
+            if save_feedback(feedback_input, rating):
+                st.success("피드백이 제출되었습니다! 감사합니다.")
             else:
-                st.warning("피드백 내용을 입력해주세요.")
+                st.warning("별점 또는 의견을 입력해 주세요.")
 
         if st.session_state.messages:
             chat_log = "역할,내용\n"
