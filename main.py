@@ -126,9 +126,10 @@ def main():
         for msg in st.session_state.messages:
             if msg["role"] == "user":
                 st.markdown(f"""
-                <div style='background-color: #e9f5ff; padding: 10px; border-radius: 20px; margin-bottom: 10px; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); max-width: 70%;'>
+                <div style='background-color: #B01920; padding: 10px; border-radius: 20px; margin-bottom: 10px; color: white; max-width: 70%;'>
                 💬 <b>질문:</b> {msg["content"]}
                 </div>""", unsafe_allow_html=True)
+
             else:
                 st.markdown(f"""
                 <div style='background-color: #f8f8f8; padding: 10px; border-radius: 20px; margin-bottom: 10px; margin-left: auto; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); max-width: 70%;'>
