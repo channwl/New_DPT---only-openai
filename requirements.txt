@@ -1,8 +1,9 @@
-streamlit
-langchain
-langchain-openai
-langchain-community
-PyMuPDF
-faiss-cpu
-python-dotenv
-openapi
+streamlit>=1.28.0
+langchain>=0.1.14
+langchain-openai>=0.0.8
+langchain-community>=0.0.21
+PyMuPDF>=1.23.3
+faiss-cpu>=1.7.4
+python-dotenv>=1.0.0
+openapi-schema-pydantic>=1.2.4
+
