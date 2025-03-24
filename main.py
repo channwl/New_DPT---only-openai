@@ -23,38 +23,6 @@ time.sleep(1)
 openai.api_key = st.secrets["openai"]["API_KEY"]
 api_key = openai.api_key
 
-# 배경 및 커스텀 CSS 적용
-for msg in st.session_state.messages:
-    if msg["role"] == "user":
-        st.markdown(f'''
-            <div style="
-                background-color: #fbe8ed; 
-                border: 2px solid #dc143c; 
-                padding: 10px; 
-                border-radius: 12px; 
-                margin-bottom: 10px;
-                width: fit-content;
-                max-width: 80%;
-            ">
-            🧑‍🎓 {msg["content"]}
-            </div>
-        ''', unsafe_allow_html=True)
-    else:
-        st.markdown(f'''
-            <div style="
-                background-color: #f1f3f4; 
-                border: 1px solid #d1d1d1; 
-                padding: 10px; 
-                border-radius: 12px; 
-                margin-bottom: 10px;
-                width: fit-content;
-                max-width: 80%;
-            ">
-            🤖 {msg["content"]}
-            </div>
-        ''', unsafe_allow_html=True)
-
-
 # PDF 처리 클래스
 class PDFProcessor:
     @staticmethod
@@ -121,10 +89,33 @@ def main():
     with mid_column:
         for msg in st.session_state.messages:
             if msg["role"] == "user":
-                st.markdown(f'<div class="user-msg">🧑‍🎓 {msg["content"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'''
+                    <div style="
+                        background-color: #fbe8ed;
+                        border: 2px solid #dc143c;
+                        padding: 10px;
+                        border-radius: 12px;
+                        margin-bottom: 10px;
+                        width: fit-content;
+                        max-width: 80%;
+                    ">
+                    🧑‍🎓 {msg["content"]}
+                    </div>
+                ''', unsafe_allow_html=True)
             else:
-                with st.chat_message("assistant"):
-                    st.markdown(f"🤖 {msg['content']}")
+                st.markdown(f'''
+                    <div style="
+                        background-color: #f1f3f4;
+                        border: 1px solid #d1d1d1;
+                        padding: 10px;
+                        border-radius: 12px;
+                        margin-bottom: 10px;
+                        width: fit-content;
+                        max-width: 80%;
+                    ">
+                    🤖 {msg["content"]}
+                    </div>
+                ''', unsafe_allow_html=True)
 
         prompt = st.chat_input("질문을 입력해 주세요.")
 
