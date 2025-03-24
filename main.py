@@ -7,19 +7,17 @@ from langchain.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
 from langchain.schema.output_parser import StrOutputParser
 from langchain_community.document_loaders import PyMuPDFLoader
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple
 import os
-import re
 import csv
 import time
-import tempfile
 import uuid
 
 # OpenAI API 키 로드
 time.sleep(1)
 api_key = st.secrets["openai"]["API_KEY"]
 
-# PDF 인덱스 생성 스크립트 (한 번만 실행)
+# PDF 인덱스 생성 스크립트
 def generate_faiss_index():
     pdf_dir = "data/"
     all_documents = []
@@ -44,34 +42,34 @@ def generate_faiss_index():
     vector_store.save_local("faiss_index_internal")
     st.success(f"{len(pdf_files)}개의 PDF 파일로 인덱스 생성 완료!")
 
-# PDF 처리 기능 클래스
+# PDF 처리 클래스
 class PDFProcessor:
     @staticmethod
     def pdf_to_documents(pdf_path: str) -> List[Document]:
-        try:
-            loader = PyMuPDFLoader(pdf_path)
-            documents = loader.load()
-            for d in documents:
-                d.metadata['file_path'] = pdf_path
-            return documents
-        except Exception as e:
-            st.error(f"PDF 로드 중 오류 발생: {e}")
-            return []
+        loader = PyMuPDFLoader(pdf_path)
+        documents = loader.load()
+        for d in documents:
+            d.metadata['file_path'] = pdf_path
+        return documents
 
     @staticmethod
     def chunk_documents(documents: List[Document]) -> List[Document]:
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
-        return text_splitter.split_documents(documents)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+        return splitter.split_documents(documents)
 
-# RAG 시스템 (OpenAI 전용)
+# RAG 시스템
 class RAGSystem:
-    def __init__(self, api_key: str, index_name: str = "faiss_index_internal"):
+    def __init__(self, api_key: str):
         self.api_key = api_key
-        self.index_name = index_name
+
+    @st.cache_resource
+    def get_vector_db(_self):
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
+        return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
 
     def get_rag_chain(self) -> Runnable:
         template = """
-        아래 컨텍스트를 바탕으로 질문에 답해주세요:
+        아래 컨텍스트를 바탕으로 질문에 답변해 주세요:
 
         1. 응답은 최대 5문장 이내로 작성합니다.
         2. 명확한 답변이 어려울 경우 **"잘 모르겠습니다."**라고 답변합니다.
@@ -88,87 +86,79 @@ class RAGSystem:
 
         답변:
         """
-
-        custom_rag_prompt = PromptTemplate.from_template(template)
+        prompt = PromptTemplate.from_template(template)
         model = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
+        return prompt | model | StrOutputParser()
 
-        return custom_rag_prompt | model | StrOutputParser()
-
-    @st.cache_resource
-    def get_vector_db(_self):
-        try:
-            embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
-            return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
-        except Exception as e:
-            st.error(f"벡터 DB 로드 중 오류 발생: {e}")
-            return None
-
-    def process_question(self, user_question: str) -> Tuple[str, List[Document]]:
+    def process_question(self, question: str) -> str:
         vector_db = self.get_vector_db()
-        if not vector_db:
-            return "시스템 오류가 발생했습니다. PDF 인덱스를 다시 생성해주세요.", []
-
-        retriever = vector_db.as_retriever(search_kwargs={"k": 10})
-        retrieve_docs = retriever.invoke(user_question)
-
+        retriever = vector_db.as_retriever(search_kwargs={"k": 5})
+        docs = retriever.invoke(question)
         chain = self.get_rag_chain()
+        return chain.invoke({"question": question, "context": docs})
 
-        try:
-            response = chain.invoke({"question": user_question, "context": retrieve_docs})
-            return response, retrieve_docs
-        except Exception as e:
-            st.error(f"응답 생성 중 오류 발생: {e}")
-            return "질문 처리 중 오류가 발생했습니다.", []
-
+# 메인 함수
 def main():
-    st.set_page_config(initial_sidebar_state="expanded", layout="wide", page_icon="🤖", page_title="디지털경영전공 챗봇")
+    st.set_page_config(page_title="디지털경영전공 챗봇", layout="wide")
 
-    if st.button("📥 (관리자) 인덱스 다시 생성하기"):
+    st.title("🎓 디지털경영전공 챗봇")
+    st.caption("여러분의 학과 관련 궁금증을 빠르게 해결해드립니다!")
+
+    if st.button("📥 (관리자 전용) 인덱스 다시 생성하기"):
         generate_faiss_index()
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    st.title("🎓 디지털경영전공 챗봇")
+    left_col, mid_col, right_col = st.columns([1, 2.5, 1.2])
 
-    left_column, mid_column, right_column = st.columns([1, 2, 1])
+    with left_col:
+        st.subheader("📚 사용 가이드")
+        st.markdown("""
+        - 궁금한 점을 입력하세요.<br>
+        - 답변을 확인해 보세요.<br>
+        - 추가 문의는 디지털경영전공 홈페이지나 학과 사무실(044-860-1560)로 문의해 주세요.
+        """, unsafe_allow_html=True)
 
-    with mid_column:
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    with mid_col:
+        for msg in st.session_state.messages:
+            if msg["role"] == "user":
+                st.markdown(f"""
+                <div style='background-color: #e9f5ff; padding: 10px; border-radius: 20px; margin-bottom: 10px; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); max-width: 70%;'>
+                💬 <b>질문:</b> {msg["content"]}
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div style='background-color: #f8f8f8; padding: 10px; border-radius: 20px; margin-bottom: 10px; margin-left: auto; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); max-width: 70%;'>
+                🤖 <b>답변:</b> {msg["content"]}
+                </div>""", unsafe_allow_html=True)
 
         prompt = st.chat_input("궁금한 점을 입력해 주세요.")
 
         if prompt:
-            with st.chat_message("user"):
-                st.markdown(prompt)
             st.session_state.messages.append({"role": "user", "content": prompt})
-
-            rag_system = RAGSystem(api_key)
-
+            rag = RAGSystem(api_key)
             with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요 😊"):
-                response, context = rag_system.process_question(prompt)
-                with st.chat_message("assistant"):
-                    st.markdown(response)
-
-            st.session_state.messages.append({"role": "assistant", "content": response})
+                answer = rag.process_question(prompt)
+            st.session_state.messages.append({"role": "assistant", "content": answer})
             st.rerun()
 
-    with right_column:
-        st.subheader("📢 피드백 남기기")
-        feedback = st.text_area("개발자에게 전하고 싶은 말을 작성해 주세요!")
-
+    with right_col:
+        st.subheader("📢 개발자에게 의견 보내기")
+        feedback_input = st.text_area("챗봇에 대한 개선 의견이나 하고 싶은 말을 남겨주세요!")
         if st.button("피드백 제출"):
-            if feedback.strip():
+            if feedback_input.strip() != "":
                 with open("feedback_log.csv", mode="a", encoding="utf-8-sig", newline="") as file:
                     writer = csv.writer(file)
-                    writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), feedback])
-                st.success("피드백이 제출되었습니다!")
+                    writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), feedback_input])
+                st.success("소중한 의견 감사합니다!")
                 st.rerun()
             else:
                 st.warning("피드백 내용을 입력해 주세요.")
 
+        st.subheader("📝 최근 질문 히스토리")
+        for i, q in enumerate([m["content"] for m in st.session_state.messages if m["role"] == "user"][-5:], 1):
+            st.markdown(f"{i}. {q}")
+
 if __name__ == "__main__":
     main()
-
