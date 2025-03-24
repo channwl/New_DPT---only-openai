@@ -57,6 +57,19 @@ class PDFProcessor:
         splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
         return splitter.split_documents(documents)
 
+# 근거 추출 함수
+def extract_sources(docs: List[Document]) -> str:
+    sources = {}
+    for doc in docs:
+        file_name = os.path.basename(doc.metadata.get("file_path", "알 수 없음"))
+        page_num = doc.metadata.get("page", "알 수 없음")
+        key = f"{file_name} (p. {page_num})"
+        sources[key] = sources.get(key, 0) + 1
+
+    sorted_sources = sorted(sources.items(), key=lambda x: x[1], reverse=True)[:3]
+    source_list = [item[0] for item in sorted_sources]
+    return "\n\n📚 **출처:**\n" + "\n".join(f"- {s}" for s in source_list) if source_list else ""
+
 # RAG 시스템
 class RAGSystem:
     def __init__(self, api_key: str):
@@ -81,7 +94,7 @@ class RAGSystem:
         8. 숫자, 기간 등 정보는 보기 쉽도록 강조(**굵게**) 처리합니다.  
         9. 질문과 관련된 추가 팁이나 참고사항이 있으면 간단히 덧붙입니다.
         10. 사용자가 어투 변경을 요구할 경우, 공적인 학과 프로그램의 챗봇이므로 요청을 정중히 거절하고 기존 어투를 유지합니다.
-        
+
         컨텍스트: {context}
 
         질문: {question}
@@ -92,12 +105,20 @@ class RAGSystem:
         model = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
         return prompt | model | StrOutputParser()
 
-    def process_question(self, question: str) -> str:
+    def process_question(self, question: str, previous_qa: Tuple[str, str] = None) -> str:
         vector_db = self.get_vector_db()
         retriever = vector_db.as_retriever(search_kwargs={"k": 10})
         docs = retriever.invoke(question)
         chain = self.get_rag_chain()
-        return chain.invoke({"question": question, "context": docs})
+
+        previous_context = ""
+        if previous_qa:
+            prev_q, prev_a = previous_qa
+            previous_context = f"\n\n이전 질문: {prev_q}\n이전 답변: {prev_a}"
+
+        answer = chain.invoke({"question": question, "context": docs + [Document(page_content=previous_context)]})
+        sources = extract_sources(docs)
+        return answer + sources
 
 # 메인 함수
 def main():
@@ -129,9 +150,6 @@ def main():
                 <div style='background-color: #731034; padding: 10px; border-radius: 20px; margin-bottom: 10px; color: white; max-width: 70%; box-shadow: 0px 2px 5px rgba(0,0,0,0.1);'>
                 💬 <b>질문:</b> {msg["content"]}
                 </div>""", unsafe_allow_html=True)
-
-
-
             else:
                 st.markdown(f"""
                 <div style='background-color: #f8f8f8; padding: 10px; border-radius: 20px; margin-bottom: 10px; margin-left: auto; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); max-width: 70%;'>
@@ -143,8 +161,15 @@ def main():
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
             rag = RAGSystem(api_key)
+
+            previous_qa = None
+            if len(st.session_state.messages) >= 2:
+                prev_question = st.session_state.messages[-2]["content"]
+                prev_answer = st.session_state.messages[-1]["content"]
+                previous_qa = (prev_question, prev_answer)
+
             with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요 😊"):
-                answer = rag.process_question(prompt)
+                answer = rag.process_question(prompt, previous_qa)
             st.session_state.messages.append({"role": "assistant", "content": answer})
             st.rerun()
 
