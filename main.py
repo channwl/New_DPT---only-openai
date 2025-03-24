@@ -1,4 +1,6 @@
 import streamlit as st
+st.set_page_config(page_title="디지털경영 챗봇", layout="wide")
+
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.documents.base import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -95,8 +97,6 @@ class RAGSystem:
 
 # 메인 앱 실행 함수
 def main():
-    st.set_page_config(page_title="디지털경영 챗봇", layout="wide")
-
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "user_questions" not in st.session_state:
