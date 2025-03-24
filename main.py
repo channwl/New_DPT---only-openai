@@ -73,6 +73,15 @@ class RAGSystem:
         chain = self.get_rag_chain()
         return chain.invoke({"question": question, "context": context_docs})
 
+# 피드백 저장 함수
+def save_feedback(feedback_text):
+    if feedback_text.strip() != "":
+        with open("feedback_log.csv", mode="a", encoding="utf-8-sig", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), feedback_text])
+        return True
+    return False
+
 # 메인 앱 실행 함수
 def main():
     if "messages" not in st.session_state:
@@ -94,10 +103,10 @@ def main():
                         background-color: #fbe8ed;
                         border: 2px solid #dc143c;
                         padding: 10px;
-                        border-radius: 12px;
+                        border-radius: 15px;
                         margin-bottom: 10px;
-                        width: fit-content;
-                        max-width: 80%;
+                        max-width: 60%;
+                        text-align: left;
                     ">
                     🧑‍🎓 {msg["content"]}
                     </div>
@@ -106,12 +115,13 @@ def main():
                 st.markdown(f'''
                     <div style="
                         background-color: #f1f3f4;
-                        border: 1px solid #d1d1d1;
+                        border: 1px solid #cccccc;
                         padding: 10px;
-                        border-radius: 12px;
+                        border-radius: 15px;
                         margin-bottom: 10px;
-                        width: fit-content;
-                        max-width: 80%;
+                        margin-left: auto;
+                        max-width: 60%;
+                        text-align: left;
                     ">
                     🤖 {msg["content"]}
                     </div>
@@ -130,13 +140,21 @@ def main():
             st.session_state.messages.append({"role": "assistant", "content": answer})
             st.experimental_rerun()
 
-    # 오른쪽 히스토리 및 다운로드
+    # 오른쪽 히스토리 및 피드백 시스템
     with right_column:
         st.subheader("📝 질문 히스토리")
         if st.session_state.user_questions:
             with st.expander("지금까지 질문한 목록"):
                 for i, q in enumerate(st.session_state.user_questions, 1):
                     st.markdown(f"{i}. {q}")
+
+        st.subheader("📢 피드백 남기기")
+        feedback_input = st.text_area("챗봇 개선을 위한 피드백을 작성해주세요!")
+        if st.button("피드백 제출"):
+            if save_feedback(feedback_input):
+                st.success("피드백이 성공적으로 제출되었습니다!")
+            else:
+                st.warning("피드백 내용을 입력해주세요.")
 
         if st.session_state.messages:
             chat_log = "역할,내용\n"
