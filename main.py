@@ -131,6 +131,7 @@ def main():
                 </div>""", unsafe_allow_html=True)
 
 
+
             else:
                 st.markdown(f"""
                 <div style='background-color: #f8f8f8; padding: 10px; border-radius: 20px; margin-bottom: 10px; margin-left: auto; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); max-width: 70%;'>
