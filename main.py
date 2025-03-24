@@ -79,6 +79,7 @@ class RAGSystem:
         6. 학생이 추가 질문을 할 수 있도록 부드러운 마무리 문장을 사용합니다.
         7. 내용을 사용자 친화적으로 정리해 줍니다.
         8. 한국어 외의 언어로 질문이 들어오면 해당 언어로 답변합니다.
+        9. 답변 내용을 정리해서 답변해줘
 
         컨텍스트: {context}
 
@@ -92,7 +93,7 @@ class RAGSystem:
 
     def process_question(self, question: str) -> str:
         vector_db = self.get_vector_db()
-        retriever = vector_db.as_retriever(search_kwargs={"k": 5})
+        retriever = vector_db.as_retriever(search_kwargs={"k": 10})
         docs = retriever.invoke(question)
         chain = self.get_rag_chain()
         return chain.invoke({"question": question, "context": docs})
