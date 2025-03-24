@@ -105,14 +105,14 @@ def main():
     st.title("🎓 디지털경영전공 AI 챗봇")
     st.caption("PDF 자료 기반으로 빠르게 학과 정보를 알려드려요!")
 
-    if st.button("📥 (관리자) 인덱스 다시 생성하기"):
+    if st.button("📥 채팅 시작 !"):
         generate_faiss_index()
 
     left_column, mid_column, right_column = st.columns([1.2, 2.5, 1.3])
 
     with left_column:
         st.subheader("📚 사용 가이드")
-        st.markdown("""1. 궁금한 내용을 입력해 주세요.<br>2. 답변을 확인하고 추가 질문도 해보세요.<br>3. 추가 문의 사항은 디지털경영전공 홈페이지를 참고하거나, 디지털경영전공 사무실(044-860-1560)에 전화하여 문의사항을 접수하세요.""", unsafe_allow_html=True)
+        st.markdown("""<br>1. 채팅 시작 ! 버튼을 눌러주세요.<br>2. 궁금한 사항을 질문해주세요.<br>3. 추가 문의 사항은 디지털경영전공 홈페이지를 참고하거나, 디지털경영전공 사무실(044-860-1560)에 전화하여 문의사항을 접수하세요.""", unsafe_allow_html=True)
 
     with mid_column:
         for msg in st.session_state.messages:
