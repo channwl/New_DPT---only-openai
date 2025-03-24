@@ -23,6 +23,44 @@ time.sleep(1)
 openai.api_key = st.secrets["openai"]["API_KEY"]
 api_key = openai.api_key
 
+# 🔎 PDF는 프로젝트 폴더 내 'data' 폴더에 넣으세요!
+# 예시:
+# project/
+# ├─ app.py
+# ├─ data/
+# │   ├─ department_info1.pdf
+# │   ├─ department_info2.pdf
+# │   ├─ ... (총 8개 PDF 전부 이 안에!)
+# ├─ faiss_index_internal/  (자동 생성됨)
+# │   ├─ index.faiss
+# │   └─ index.pkl
+# └─ feedback_log.csv
+
+# PDF 인덱스 생성 스크립트 (한 번만 실행)
+def generate_faiss_index():
+    pdf_dir = "data/"
+    all_documents = []
+
+    if not os.path.exists(pdf_dir):
+        os.makedirs(pdf_dir)
+        st.warning("data/ 폴더가 생성되었습니다. PDF 파일을 여기에 넣고 다시 실행하세요.")
+        return
+
+    pdf_files = [file for file in os.listdir(pdf_dir) if file.endswith(".pdf")]
+    if not pdf_files:
+        st.error("data/ 폴더에 PDF 파일이 없습니다. PDF를 추가한 후 다시 실행하세요.")
+        return
+
+    for file_name in pdf_files:
+        docs = PDFProcessor.pdf_to_documents(os.path.join(pdf_dir, file_name))
+        all_documents.extend(docs)
+
+    chunks = PDFProcessor.chunk_documents(all_documents)
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
+    vector_store = FAISS.from_documents(chunks, embeddings)
+    vector_store.save_local("faiss_index_internal")
+    st.success(f"{len(pdf_files)}개의 PDF 파일로 인덱스 생성 완료!")
+
 # PDF 처리 클래스
 class PDFProcessor:
     @staticmethod
@@ -38,22 +76,15 @@ class PDFProcessor:
         splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
         return splitter.split_documents(documents)
 
-    @staticmethod
-    def save_to_vector_store(documents: list[Document], index_name: str) -> bool:
-        try:
-            embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
-            vector_store = FAISS.from_documents(documents, embeddings)
-            vector_store.save_local(index_name)
-            return True
-        except Exception as e:
-            st.error(f"벡터 저장 중 오류 발생: {e}")
-            return False
-
-# RAG 시스템 클래스
+# RAG 시스템 클래스 (사전 인덱스 불러오기)
 class RAGSystem:
-    def __init__(self, api_key: str, index_name: str):
+    def __init__(self, api_key: str):
         self.api_key = api_key
-        self.index_name = index_name
+
+    @st.cache_resource
+    def get_vector_db(_self):
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
+        return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
 
     def get_rag_chain(self) -> Runnable:
         template = """질문: {question}\n\n컨텍스트: {context}\n\n답변:"""
@@ -61,13 +92,8 @@ class RAGSystem:
         model = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
         return prompt | model | StrOutputParser()
 
-    @st.cache_resource
-    def get_vector_db(_self, index_name):
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
-        return FAISS.load_local(index_name, embeddings, allow_dangerous_deserialization=True)
-
     def process_question(self, question: str) -> str:
-        vector_db = self.get_vector_db(self.index_name)
+        vector_db = self.get_vector_db()
         retriever = vector_db.as_retriever(search_kwargs={"k": 5})
         context_docs = retriever.invoke(question)
         chain = self.get_rag_chain()
@@ -90,11 +116,13 @@ def main():
         st.session_state.user_questions = []
 
     st.title("💬 디지털경영전공 AI 챗봇")
-    st.caption("PDF 기반 학과 정보 상담 도우미")
+    st.caption("사전 구축된 인덱스를 사용하여 빠른 PDF 기반 상담 지원")
+
+    if st.button("📥 (관리자) 인덱스 다시 생성하기"):
+        generate_faiss_index()
 
     left_column, mid_column, right_column = st.columns([1.2, 2.5, 1.3])
 
-    # 중앙 채팅 영역
     with mid_column:
         for msg in st.session_state.messages:
             if msg["role"] == "user":
@@ -133,26 +161,25 @@ def main():
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.session_state.user_questions.append(prompt)
 
-            rag_system = RAGSystem(api_key, "faiss_index_department")
+            rag_system = RAGSystem(api_key)
             with st.spinner("답변 생성 중..."):
                 answer = rag_system.process_question(prompt)
 
             st.session_state.messages.append({"role": "assistant", "content": answer})
             st.experimental_rerun()
 
-    # 오른쪽 히스토리 및 피드백 시스템
     with right_column:
         st.subheader("📝 질문 히스토리")
         if st.session_state.user_questions:
-            with st.expander("지금까지 질문한 목록"):
+            with st.expander("질문 목록"):
                 for i, q in enumerate(st.session_state.user_questions, 1):
                     st.markdown(f"{i}. {q}")
 
         st.subheader("📢 피드백 남기기")
-        feedback_input = st.text_area("챗봇 개선을 위한 피드백을 작성해주세요!")
+        feedback_input = st.text_area("챗봇에 대한 의견을 남겨주세요!")
         if st.button("피드백 제출"):
             if save_feedback(feedback_input):
-                st.success("피드백이 성공적으로 제출되었습니다!")
+                st.success("피드백이 제출되었습니다!")
             else:
                 st.warning("피드백 내용을 입력해주세요.")
 
@@ -164,7 +191,7 @@ def main():
                 chat_log += f"{role},{content}\n"
 
             st.download_button(
-                label="⬇️ 질문-응답 기록 다운로드 (CSV)",
+                label="⬇️ 대화 기록 다운로드 (CSV)",
                 data=chat_log.encode("utf-8-sig"),
                 file_name="chat_history.csv",
                 mime="text/csv"
