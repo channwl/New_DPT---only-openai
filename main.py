@@ -57,19 +57,6 @@ class PDFProcessor:
         splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
         return splitter.split_documents(documents)
 
-# 근거 추출 함수
-def extract_sources(docs: List[Document]) -> str:
-    sources = {}
-    for doc in docs:
-        file_name = os.path.basename(doc.metadata.get("file_path", "알 수 없음"))
-        page_num = doc.metadata.get("page", "알 수 없음")
-        key = f"{file_name} (p. {page_num})"
-        sources[key] = sources.get(key, 0) + 1
-
-    sorted_sources = sorted(sources.items(), key=lambda x: x[1], reverse=True)[:3]
-    source_list = [item[0] for item in sorted_sources]
-    return "\n\n📚 **출처:**\n" + "\n".join(f"- {s}" for s in source_list) if source_list else ""
-
 # RAG 시스템
 class RAGSystem:
     def __init__(self, api_key: str):
@@ -93,7 +80,9 @@ class RAGSystem:
         7. 한국어 외 언어로 질문 시 해당 언어로 번역해 답변합니다.  
         8. 질문과 관련된 추가 팁이나 참고사항이 있으면 간단히 덧붙입니다.
         9. 사용자가 어투 변경을 요구할 경우, 공적인 학과 프로그램의 챗봇이므로 요청을 정중히 거절하고 기존 어투를 유지합니다.
-
+        10. 핵심 내용은 **굵게** 강조하여 요약합니다
+        11. 복잡한 정보는 **불릿 포인트**로 쉽게 정리합니다.
+        
         컨텍스트: {context}
 
         질문: {question}
@@ -116,8 +105,7 @@ class RAGSystem:
             previous_context = f"\n\n이전 질문: {prev_q}\n이전 답변: {prev_a}"
 
         answer = chain.invoke({"question": question, "context": docs + [Document(page_content=previous_context)]})
-        sources = extract_sources(docs)
-        return answer + sources
+        return answer
 
 # 메인 함수
 def main():
