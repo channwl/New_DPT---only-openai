@@ -56,15 +56,16 @@ class PDFProcessor:
         splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
         return splitter.split_documents(documents)
 
-# RAG 시스템 with memory
+# RAG 시스템 with lazy load
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self.vector_db = None  # 초기에는 로딩하지 않음
 
-    @st.cache_resource
-    def get_vector_db(_self):
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
-        return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
+    def load_vector_db(self):
+        if self.vector_db is None:
+            embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=self.api_key)
+            self.vector_db = FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
 
     def get_rag_chain(self, chat_history: str) -> Runnable:
         template = """
@@ -95,10 +96,9 @@ class RAGSystem:
         return prompt | model | StrOutputParser()
 
     def process_question(self, question: str, chat_history: str) -> str:
-        vector_db = self.get_vector_db()
-        retriever = vector_db.as_retriever(search_kwargs={"k": 10})
+        self.load_vector_db()
+        retriever = self.vector_db.as_retriever(search_kwargs={"k": 5})  # k값도 최적화
         docs = retriever.invoke(question)
-        # context에 PDF 출처 표시
         context_with_source = "\n".join([f"출처: {doc.metadata.get('file_path', '알 수 없음')}\n{doc.page_content}" for doc in docs])
         chain = self.get_rag_chain(chat_history)
         return chain.invoke({"question": question, "context": context_with_source, "chat_history": chat_history})
