@@ -19,8 +19,6 @@ import uuid
 time.sleep(1)
 api_key = st.secrets["openai"]["API_KEY"]
 
-# 기존 함수들 그대로 유지...
-
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
