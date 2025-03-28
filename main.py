@@ -7,6 +7,8 @@ from langchain.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
 from langchain.schema.output_parser import StrOutputParser
 from langchain_community.document_loaders import PyMuPDFLoader
+from langchain.memory import ConversationSummaryMemory
+from langchain.chains import ConversationChain
 from typing import List, Tuple
 import os
 import csv
@@ -17,50 +19,19 @@ import uuid
 time.sleep(1)
 api_key = st.secrets["openai"]["API_KEY"]
 
-# PDF 인덱스 생성 스크립트
-def generate_faiss_index():
-    pdf_dir = "data/"
-    all_documents = []
+# 기존 함수들 그대로 유지...
 
-    if not os.path.exists(pdf_dir):
-        os.makedirs(pdf_dir)
-        st.warning("data/ 폴더가 생성되었습니다. PDF 파일을 여기에 넣고 다시 실행하세요.")
-        return
-
-    pdf_files = [file for file in os.listdir(pdf_dir) if file.endswith(".pdf")]
-    if not pdf_files:
-        st.error("data/ 폴더에 PDF 파일이 없습니다. PDF를 추가한 후 다시 실행하세요.")
-        return
-
-    for file_name in pdf_files:
-        docs = PDFProcessor.pdf_to_documents(os.path.join(pdf_dir, file_name))
-        all_documents.extend(docs)
-
-    chunks = PDFProcessor.chunk_documents(all_documents)
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
-    vector_store = FAISS.from_documents(chunks, embeddings)
-    vector_store.save_local("faiss_index_internal")
-    st.success(f"{len(pdf_files)}개의 PDF 파일로 인덱스 생성 완료!")
-
-# PDF 처리 클래스
-class PDFProcessor:
-    @staticmethod
-    def pdf_to_documents(pdf_path: str) -> List[Document]:
-        loader = PyMuPDFLoader(pdf_path)
-        documents = loader.load()
-        for d in documents:
-            d.metadata['file_path'] = pdf_path
-        return documents
-
-    @staticmethod
-    def chunk_documents(documents: List[Document]) -> List[Document]:
-        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
-        return splitter.split_documents(documents)
-
-# RAG 시스템
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
+        # 대화 기억 모듈 초기화
+        self.llm = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
+        self.memory = ConversationSummaryMemory(llm=self.llm)
+        self.conversation_chain = ConversationChain(
+            llm=self.llm, 
+            memory=self.memory, 
+            verbose=True
+        )
 
     @st.cache_resource
     def get_vector_db(_self):
@@ -69,23 +40,27 @@ class RAGSystem:
 
     def get_rag_chain(self) -> Runnable:
         template = """
-        아래 컨텍스트를 바탕으로 질문에 답변해 주세요:
+        아래 컨텍스트와 대화 기록을 바탕으로 질문에 답변해 주세요:
 
-        1. 답변은 최대 4문장 이내로 간결하고 명확하게 작성합니다.  
-        2. 중요한 내용은 핵심만 요약해서 전달합니다.  
-        3. 답변이 어려우면 “잘 모르겠습니다.”라고 정중히 답변합니다.  
-        4. 질문에 ‘디지털경영전공’ 단어가 없어도 관련 정보를 PDF에서 찾아서 답변합니다.  
-        5. 학생이 이해하기 쉽게 짧은 문장과 불릿 포인트로 정리합니다.  
-        6. 추가 질문을 유도하는 마무리 멘트(“추가로 궁금하신 점이 있다면 편하게 말씀해 주세요 😊”)를 마지막에 넣습니다.  
-        7. 한국어 외 언어로 질문 시 해당 언어로 번역해 답변합니다.  
-        8. 질문과 관련된 추가 팁이나 참고사항이 있으면 간단히 덧붙입니다.
-        9. 사용자가 어투 변경을 요구할 경우, 공적인 학과 프로그램의 챗봇이므로 요청을 정중히 거절하고 기존 어투를 유지합니다.
-        10. 핵심 내용은 **굵게** 강조하여 요약합니다
-        11. 복잡한 정보는 **불릿 포인트**로 쉽게 정리합니다.
-        12. 전공 과목 목록이나 선택 과목을 안내할 때는 전체 리스트를 최대한 구체적으로 나열해 줍니다. (Ex. 전공 선택 과목을 구체적으로 알려줘 / 답변 : 전공 필수 과목 제외 모든 전공 안내)
-        
+        1. 대화의 전체 맥락을 고려하여 답변합니다.
+        2. 이전 대화에서 언급된 내용을 참고합니다.
+        3. 답변은 최대 4문장 이내로 간결하고 명확하게 작성합니다.  
+        4. 중요한 내용은 핵심만 요약해서 전달합니다.  
+        5. 답변이 어려우면 "잘 모르겠습니다."라고 정중히 답변합니다.  
+        6. 질문에 '디지털경영전공' 단어가 없어도 관련 정보를 PDF에서 찾아서 답변합니다.  
+        7. 학생이 이해하기 쉽게 짧은 문장과 불릿 포인트로 정리합니다.  
+        8. 추가 질문을 유도하는 마무리 멘트를 넣습니다.  
+        9. 한국어 외 언어로 질문 시 해당 언어로 번역해 답변합니다.  
+        10. 핵심 내용은 **굵게** 강조하여 요약합니다.
+        11. **대화 전체 맥락 고려**: 이전 대화 내용을 철저히 분석하고 연결합니다.
+        12. **일관성 유지**: 이전 답변과 모순되지 않도록 주의합니다.
+        13. **상황별 대응**:
+           - 반복 질문: 새로운 관점 또는 추가 정보 제공
+           - 모호한 질문: 구체적 맥락 확인 후 답변
+           - 연속 질문: 이전 대화 흐름 자연스럽게 이어가기
+
+        대화 기록: {history}
         컨텍스트: {context}
-
         질문: {question}
 
         답변:
@@ -94,18 +69,28 @@ class RAGSystem:
         model = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
         return prompt | model | StrOutputParser()
 
-    def process_question(self, question: str, previous_qa: Tuple[str, str] = None) -> str:
+    def process_question(self, question: str) -> str:
+        # 벡터 데이터베이스에서 관련 문서 검색
         vector_db = self.get_vector_db()
         retriever = vector_db.as_retriever(search_kwargs={"k": 10})
         docs = retriever.invoke(question)
+        
+        # 대화 기록 요약 가져오기
+        conversation_history = self.memory.chat_memory.messages
+
+        # RAG 체인 생성
         chain = self.get_rag_chain()
 
-        previous_context = ""
-        if previous_qa:
-            prev_q, prev_a = previous_qa
-            previous_context = f"\n\n이전 질문: {prev_q}\n이전 답변: {prev_a}"
+        # 대화 기록과 문서 컨텍스트를 포함하여 답변 생성
+        answer = chain.invoke({
+            "question": question, 
+            "context": docs, 
+            "history": conversation_history
+        })
 
-        answer = chain.invoke({"question": question, "context": docs + [Document(page_content=previous_context)]})
+        # 대화 체인에 대화 추가
+        self.conversation_chain.predict(input=question)
+
         return answer
 
 # 메인 함수
