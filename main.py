@@ -1,5 +1,8 @@
+from langchain.chat_models import ChatOpenAI
+from langchain.memory import ConversationSummaryMemory
+from langchain.chains import ConversationChain
 import streamlit as st
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI as OpenAIChat, OpenAIEmbeddings
 from langchain_core.documents.base import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -11,11 +14,15 @@ from typing import List, Tuple
 import os
 import csv
 import time
-import uuid
 
 # OpenAI API 키 로드
 time.sleep(1)
 api_key = st.secrets["openai"]["API_KEY"]
+
+# 요약 기반 메모리 초기화
+llm = ChatOpenAI(model_name="gpt-4o", temperature=0, openai_api_key=api_key)
+memory = ConversationSummaryMemory(llm=llm)
+conversation = ConversationChain(llm=llm, memory=memory, verbose=True)
 
 # PDF 처리 클래스
 class PDFProcessor:
@@ -70,7 +77,7 @@ class RAGSystem:
     def get_rag_chain(self) -> Runnable:
         template = """
         아래 컨텍스트를 바탕으로 질문에 답변해 주세요:
-
+        
         1. 답변은 최대 4문장 이내로 간결하고 명확하게 작성합니다.
         2. 중요한 내용은 핵심만 요약해서 전달합니다.
         3. 답변이 어려우면 “잘 모르겠습니다.”라고 정중히 답변합니다.
@@ -86,17 +93,16 @@ class RAGSystem:
         13. **대화 전체 맥락 고려**: 이전 대화 내용을 철저히 분석하고 연결합니다.
         14. **일관성 유지**: 이전 답변과 모순되지 않도록 주의합니다
         15. **상황별 대응**:
-           - 반복 질문: 새로운 관점 또는 추가 정보 제공
-           - 모호한 질문: 구체적 맥락 확인 후 답변
-           - 연속 질문: 이전 대화 흐름 자연스럽게 이어가기
-
+       - 반복 질문: 새로운 관점 또는 추가 정보 제공
+       - 모호한 질문: 구체적 맥락 확인 후 답변
+       - 연속 질문: 이전 대화 흐름 자연스럽게 이어가기
         컨텍스트: {context}
         질문: {question}
 
         답변:
         """
         prompt = PromptTemplate.from_template(template)
-        model = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
+        model = OpenAIChat(model="gpt-4o", openai_api_key=self.api_key)
         return prompt | model | StrOutputParser()
 
     def process_question(self, question: str, previous_qa: Tuple[str, str] = None) -> str:
@@ -165,8 +171,12 @@ def main():
                 previous_qa = (prev_question, prev_answer)
 
             with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요."):
-                answer = rag.process_question(prompt, previous_qa)
-            st.session_state.messages.append({"role": "assistant", "content": answer})
+                rag_answer = rag.process_question(prompt, previous_qa)
+                # 요약 기반 대화 흐름 유지
+                convo_answer = conversation.predict(input=prompt)
+                final_answer = f"{rag_answer}\n\n(요약 기반 추가 답변)\n{convo_answer}"
+
+            st.session_state.messages.append({"role": "assistant", "content": final_answer})
             st.rerun()
 
     with right_col:
