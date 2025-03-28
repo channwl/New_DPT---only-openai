@@ -13,8 +13,9 @@ import os
 import csv
 import time
 
-# PDF 처리 클래스
+# PDF 처리 클래스 정의
 class PDFProcessor:
+    #PDF를 문서 list로 변환
     @staticmethod
     def pdf_to_documents(pdf_path: str) -> List[Document]:
         loader = PyMuPDFLoader(pdf_path)
@@ -22,7 +23,7 @@ class PDFProcessor:
         for d in documents:
             d.metadata['file_path'] = pdf_path
         return documents
-
+    #chunking!
     @staticmethod
     def chunk_documents(documents: List[Document]) -> List[Document]:
         splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
@@ -32,7 +33,7 @@ class PDFProcessor:
 def generate_faiss_index():
     pdf_dir = "data/"
     all_documents = []
-
+    
     if not os.path.exists(pdf_dir):
         os.makedirs(pdf_dir)
         st.warning("data/ 폴더가 생성되었습니다. PDF 파일을 여기에 넣고 다시 실행해주세요.")
@@ -43,10 +44,12 @@ def generate_faiss_index():
         st.error("data/ 폴더에 PDF 파일이 없습니다. PDF를 추가한 후 다시 실행해주세요.")
         return
 
+    #PDF 파일 문서화
     for file_name in pdf_files:
         docs = PDFProcessor.pdf_to_documents(os.path.join(pdf_dir, file_name))
         all_documents.extend(docs)
 
+    #문서 chunking, vector embedding 생성, 인덱싱
     chunks = PDFProcessor.chunk_documents(all_documents)
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     vector_store = FAISS.from_documents(chunks, embeddings)
@@ -57,6 +60,8 @@ def generate_faiss_index():
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
+
+        #LLM 초기화
         self.llm = ChatOpenAI(
             model="gpt-4o", 
             openai_api_key=self.api_key, 
@@ -69,13 +74,17 @@ class RAGSystem:
             return_messages=True, 
             max_token_limit=500
         )
+
+        #RAG chain 구성
         self.rag_chain = self.get_rag_chain()
 
+    #vecter DB 불러오기
     @st.cache_resource
     def get_vector_db(_self):
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
         return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
 
+    #prompt templete 구성 + RAG chain 구성
     def get_rag_chain(self) -> Runnable:
         template = """
         아래 컨텍스트와 대화 기록을 바탕으로 질문에 답변해 주세요:
@@ -102,7 +111,10 @@ class RAGSystem:
         prompt = PromptTemplate.from_template(template)
         return prompt | self.llm | StrOutputParser()
 
+    # 사용자의 질문을 처리하고 답변 반환
     def process_question(self, question: str) -> str:
+
+        #관련 문서 검색
         vector_db = self.get_vector_db()
         retriever = vector_db.as_retriever(search_kwargs={"k": 10})
         docs = retriever.invoke(question)
@@ -110,6 +122,7 @@ class RAGSystem:
         # 대화 기록 요약 가져오기
         conversation_history = self.memory.chat_memory.messages
 
+        #LLM 호출
         answer = self.rag_chain.invoke({
             "question": question,
             "context": docs,
@@ -127,14 +140,18 @@ def main():
     st.title("🎓 디지털경영전공 챗봇")
     st.caption("학과에 대한 다양한 질문에 친절하게 답변해드립니다.")
 
+    #이 버튼 클릭 시 PDF 인덱스 생성
     if st.button("📥 채팅 시작 !"):
         generate_faiss_index()
 
+    # 세션 상태 초기화 (대화 로그 저장)
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    #페이지 3단구성
     left_col, mid_col, right_col = st.columns([1, 2.5, 1.2])
 
+    #left : 사용 가이드
     with left_col:
         st.subheader("📚 사용 가이드")
         st.markdown("""
@@ -143,6 +160,7 @@ def main():
         - 추가 문의는 디지털경영전공 홈페이지 또는 학과 사무실(044-860-1560)로 연락 바랍니다.
         """, unsafe_allow_html=True)
 
+    #mid : 채팅 기록 표시 및 입력
     with mid_col:
         for msg in st.session_state.messages:
             if msg["role"] == "user":
@@ -156,6 +174,7 @@ def main():
                 🤖 <b>답변:</b> {msg["content"]}
                 </div>""", unsafe_allow_html=True)
 
+        #사용자 질문 입력 및 처리
         prompt = st.chat_input("궁금한 점을 입력해 주세요.")
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
@@ -167,6 +186,7 @@ def main():
             st.session_state.messages.append({"role": "assistant", "content": answer})
             st.rerun()
 
+    # right : 피드백 및 최근 질문
     with right_col:
         st.subheader("📢 개발자에게 의견 보내기")
         feedback_input = st.text_area("챗봇에 대한 개선 의견이나 하고 싶은 말을 남겨주세요.")
@@ -184,5 +204,6 @@ def main():
         for i, q in enumerate([m["content"] for m in st.session_state.messages if m["role"] == "user"][-5:], 1):
             st.markdown(f"{i}. {q}")
 
+#streamlit 앱 실행 시작
 if __name__ == "__main__":
     main()
