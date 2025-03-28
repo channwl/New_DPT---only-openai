@@ -1,8 +1,5 @@
-from langchain.chat_models import ChatOpenAI
-from langchain.memory import ConversationSummaryMemory
-from langchain.chains import ConversationChain
 import streamlit as st
-from langchain_openai import ChatOpenAI as OpenAIChat, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.documents.base import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -10,6 +7,7 @@ from langchain.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
 from langchain.schema.output_parser import StrOutputParser
 from langchain_community.document_loaders import PyMuPDFLoader
+from langchain.memory import ConversationSummaryMemory
 from typing import List, Tuple
 import os
 import csv
@@ -18,13 +16,6 @@ import time
 # OpenAI API 키 로드
 time.sleep(1)
 api_key = st.secrets["openai"]["API_KEY"]
-
-# 요약 기반 메모리 초기화
-llm = ChatOpenAI(model_name="gpt-4o", temperature=0, openai_api_key=api_key)
-memory = ConversationSummaryMemory(llm=llm)
-conversation = ConversationChain(llm=llm, 
-                                 memory=memory, 
-                                 verbose=True)
 
 # PDF 처리 클래스
 class PDFProcessor:
@@ -70,6 +61,9 @@ def generate_faiss_index():
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self.llm = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
+        self.memory = ConversationSummaryMemory(llm=self.llm)
+        self.rag_chain = self.get_rag_chain()
 
     @st.cache_resource
     def get_vector_db(_self):
@@ -78,8 +72,8 @@ class RAGSystem:
 
     def get_rag_chain(self) -> Runnable:
         template = """
-        아래 컨텍스트를 바탕으로 질문에 답변해 주세요:
-        
+        아래 컨텍스트와 대화 기록을 바탕으로 질문에 답변해 주세요:
+
         1. 답변은 최대 4문장 이내로 간결하고 명확하게 작성합니다.
         2. 중요한 내용은 핵심만 요약해서 전달합니다.
         3. 답변이 어려우면 “잘 모르겠습니다.”라고 정중히 답변합니다.
@@ -92,36 +86,32 @@ class RAGSystem:
         10. 핵심 내용은 **굵게** 표시해 강조합니다.
         11. 복잡한 정보는 **불릿 포인트**로 요약 정리합니다.
         12. 전공 과목 안내 시에는 전체 리스트를 구체적으로 나열합니다.
-        13. **대화 전체 맥락 고려**: 이전 대화 내용을 철저히 분석하고 연결합니다.
-        14. **일관성 유지**: 이전 답변과 모순되지 않도록 주의합니다
-        15. **상황별 대응**:
-       - 반복 질문: 새로운 관점 또는 추가 정보 제공
-       - 모호한 질문: 구체적 맥락 확인 후 답변
-       - 연속 질문: 이전 대화 흐름 자연스럽게 이어가기
+
+        대화 기록 요약: {history}
         컨텍스트: {context}
         질문: {question}
 
         답변:
         """
         prompt = PromptTemplate.from_template(template)
-        model = OpenAIChat(model="gpt-4o", openai_api_key=self.api_key)
-        return prompt | model | StrOutputParser()
+        return prompt | self.llm | StrOutputParser()
 
-    def process_question(self, question: str, previous_qa: Tuple[str, str] = None) -> str:
+    def process_question(self, question: str) -> str:
         vector_db = self.get_vector_db()
         retriever = vector_db.as_retriever(search_kwargs={"k": 10})
         docs = retriever.invoke(question)
-        chain = self.get_rag_chain()
 
-        previous_context = ""
-        if previous_qa:
-            prev_q, prev_a = previous_qa
-            previous_context = f"\n\n이전 질문: {prev_q}\n이전 답변: {prev_a}"
+        # 대화 기록 요약 가져오기
+        conversation_history = self.memory.chat_memory.messages
 
-        answer = chain.invoke({
+        answer = self.rag_chain.invoke({
             "question": question,
-            "context": docs + [Document(page_content=previous_context)]
+            "context": docs,
+            "history": conversation_history,
         })
+
+        # 대화 내용을 memory에 저장
+        self.memory.save_context({"input": question}, {"output": answer})
 
         return answer
 
@@ -161,24 +151,14 @@ def main():
                 </div>""", unsafe_allow_html=True)
 
         prompt = st.chat_input("궁금한 점을 입력해 주세요.")
-
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
             rag = RAGSystem(api_key)
 
-            previous_qa = None
-            if len(st.session_state.messages) >= 2:
-                prev_question = st.session_state.messages[-2]["content"]
-                prev_answer = st.session_state.messages[-1]["content"]
-                previous_qa = (prev_question, prev_answer)
-
             with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요."):
-                rag_answer = rag.process_question(prompt, previous_qa)
-                # 요약 기반 대화 흐름 유지
-                convo_answer = conversation.predict(input=prompt)
-                final_answer = f"{rag_answer}\n\n(요약 기반 추가 답변)\n{convo_answer}"
+                answer = rag.process_question(prompt)
 
-            st.session_state.messages.append({"role": "assistant", "content": final_answer})
+            st.session_state.messages.append({"role": "assistant", "content": answer})
             st.rerun()
 
     with right_col:
