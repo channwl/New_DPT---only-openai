@@ -22,7 +22,9 @@ api_key = st.secrets["openai"]["API_KEY"]
 # 요약 기반 메모리 초기화
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0, openai_api_key=api_key)
 memory = ConversationSummaryMemory(llm=llm)
-conversation = ConversationChain(llm=llm, memory=memory, verbose=True)
+conversation = ConversationChain(llm=llm, 
+                                 memory=memory, 
+                                 verbose=True)
 
 # PDF 처리 클래스
 class PDFProcessor:
