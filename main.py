@@ -13,10 +13,6 @@ import os
 import csv
 import time
 
-# OpenAI API 키 로드
-time.sleep(1)
-api_key = st.secrets["openai"]["API_KEY"]
-
 # PDF 처리 클래스
 class PDFProcessor:
     @staticmethod
@@ -61,8 +57,18 @@ def generate_faiss_index():
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.llm = ChatOpenAI(model="gpt-4o", openai_api_key=self.api_key)
-        self.memory = ConversationSummaryMemory(llm=self.llm)
+        self.llm = ChatOpenAI(
+            model="gpt-4o", 
+            openai_api_key=self.api_key, 
+            temperature=0  # 일관된 답변을 위해 온도 낮게 설정
+        )
+        
+        # 대화 요약 메모리 추가
+        self.memory = ConversationSummaryMemory(
+            llm=self.llm, 
+            return_messages=True, 
+            max_token_limit=500
+        )
         self.rag_chain = self.get_rag_chain()
 
     @st.cache_resource
@@ -76,10 +82,10 @@ class RAGSystem:
 
         1. 답변은 최대 4문장 이내로 간결하고 명확하게 작성합니다.
         2. 중요한 내용은 핵심만 요약해서 전달합니다.
-        3. 답변이 어려우면 “잘 모르겠습니다.”라고 정중히 답변합니다.
-        4. 질문에 ‘디지털경영전공’ 단어가 없어도 관련 정보를 PDF에서 찾아서 답변합니다.
+        3. 답변이 어려우면 "잘 모르겠습니다."라고 정중히 답변합니다.
+        4. 질문에 '디지털경영전공' 단어가 없어도 관련 정보를 PDF에서 찾아서 답변합니다.
         5. 이해하기 쉬운 짧은 문장과 불릿 포인트로 정리합니다.
-        6. 마지막에 “추가로 궁금하신 점이 있다면 언제든지 말씀해주세요.”라고 안내합니다.
+        6. 마지막에 "추가로 궁금하신 점이 있다면 언제든지 말씀해주세요."라고 안내합니다.
         7. 한국어 외 언어로 질문 시 해당 언어로 번역하여 답변합니다.
         8. 관련된 참고 사항이 있다면 간단히 덧붙입니다.
         9. 챗봇 어투는 항상 친절하고 단정하게 유지합니다.
@@ -153,7 +159,7 @@ def main():
         prompt = st.chat_input("궁금한 점을 입력해 주세요.")
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
-            rag = RAGSystem(api_key)
+            rag = RAGSystem(st.secrets["openai"]["API_KEY"])
 
             with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요."):
                 answer = rag.process_question(prompt)
