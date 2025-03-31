@@ -28,10 +28,10 @@ class PDFProcessor:
         for d in documents:
             d.metadata['file_path'] = pdf_path
         return documents
-    #chunking!
     @staticmethod
     def chunk_documents(documents: List[Document]) -> List[Document]:
-        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
+        splitter = SemanticChunker(embeddings=embeddings, chunk_size=800)
         return splitter.split_documents(documents)
 
 # PDF 인덱스 생성 함수
