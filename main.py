@@ -1,13 +1,14 @@
 import streamlit as st
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.documents.base import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.text_splitter import SemanticChunker
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
 from langchain.schema.output_parser import StrOutputParser
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.memory import ConversationSummaryMemory
+from langchain.embeddings.openai import OpenAIEmbeddings
 from typing import List, Tuple
 import os
 import csv
