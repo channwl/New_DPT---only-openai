@@ -13,6 +13,10 @@ import os
 import csv
 import time
 
+# API 키 로드
+time.sleep(1)
+api_key = st.secrets["openai"]["API_KEY"]
+
 # PDF 처리 클래스 정의
 class PDFProcessor:
     #PDF를 문서 list로 변환
