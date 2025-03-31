@@ -1,7 +1,7 @@
 import streamlit as st
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.documents.base import Document
-from langchain.text_splitter import SemanticChunker
+from langchain.text_splitters import SemanticChunker
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
