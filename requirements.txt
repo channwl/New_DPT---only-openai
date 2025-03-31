@@ -2,6 +2,7 @@ streamlit>=1.32.0
 langchain>=0.1.13
 langchain-community>=0.0.19
 langchain-openai>=0.0.8
+langchain-text-splitters>=0.0.1
 openai>=1.13.3
 tiktoken>=0.5.1
 PyMuPDF>=1.23.19
