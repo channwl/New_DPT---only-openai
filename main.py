@@ -56,35 +56,38 @@ def generate_faiss_index():
     vector_store.save_local("faiss_index_internal")
     st.success(f"{len(pdf_files)}개의 PDF 파일로 인덱스 생성이 완료되었습니다.")
 
-# RAG 시스템
+#RAG
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-        #LLM 초기화
+        # LLM 초기화
         self.llm = ChatOpenAI(
             model="gpt-4o", 
             openai_api_key=self.api_key, 
-            temperature=0  # 일관된 답변을 위해 온도 낮게 설정
+            temperature=0
         )
         
         # 대화 요약 메모리 추가
         self.memory = ConversationSummaryMemory(
             llm=self.llm, 
-            return_messages=True, 
-            max_token_limit=500
+            return_messages=True,
+            max_token_limit=300,
+            memory_key="history",
+            input_key="input",
+            output_key="output"
         )
 
-        #RAG chain 구성
+        # RAG chain 구성
         self.rag_chain = self.get_rag_chain()
 
-    #vecter DB 불러오기
+    # vector DB 불러오기
     @st.cache_resource
     def get_vector_db(_self):
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_self.api_key)
         return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
 
-    #prompt templete 구성 + RAG chain 구성
+    # prompt template 구성 + RAG chain 구성
     def get_rag_chain(self) -> Runnable:
         template = """
         아래 컨텍스트와 대화 기록을 바탕으로 질문에 답변해 주세요:
@@ -101,8 +104,11 @@ class RAGSystem:
         10. 핵심 내용은 **굵게** 표시해 강조합니다.
         11. 복잡한 정보는 **불릿 포인트**로 요약 정리합니다.
         12. 전공 과목 안내 시에는 전체 리스트를 구체적으로 나열합니다.
+        13. 추가 안내는 "추가로 궁금한 점이 있다면 언제든지 말씀해주세요."로 마무리합니다.
+        14. 같은 말을 반복하지 마세요
 
-        대화 기록 요약: {history}
+        이전 대화 요약: {history}
+        
         컨텍스트: {context}
         질문: {question}
 
@@ -114,19 +120,19 @@ class RAGSystem:
     # 사용자의 질문을 처리하고 답변 반환
     def process_question(self, question: str) -> str:
 
-        #관련 문서 검색
+        # 관련 문서 검색
         vector_db = self.get_vector_db()
         retriever = vector_db.as_retriever(search_kwargs={"k": 10})
         docs = retriever.invoke(question)
 
-        # 대화 기록 요약 가져오기
-        conversation_history = self.memory.chat_memory.messages
+        # 대화 기록 요약 불러오기
+        history_summary = self.memory.load_memory_variables({})['history']
 
-        #LLM 호출
+        # LLM 호출
         answer = self.rag_chain.invoke({
             "question": question,
             "context": docs,
-            "history": conversation_history,
+            "history": history_summary,
         })
 
         # 대화 내용을 memory에 저장
