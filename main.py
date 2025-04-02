@@ -126,7 +126,7 @@ class RAGSystem:
 
         # 관련 문서 검색
         vector_db = self.get_vector_db()
-        retriever = vector_db.as_retriever(search_kwargs={"k": 10})
+        retriever = vector_db.as_retriever(search_kwargs={"k": 7})
         docs = retriever.invoke(question)
 
         # 대화 기록 요약 불러오기
