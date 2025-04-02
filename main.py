@@ -1,14 +1,13 @@
 import streamlit as st
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.documents.base import Document
-from langchain_text_splitters import SemanticChunker
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
 from langchain.schema.output_parser import StrOutputParser
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.memory import ConversationSummaryMemory
-from langchain.embeddings.openai import OpenAIEmbeddings
 from typing import List, Tuple
 import os
 import csv
@@ -28,10 +27,10 @@ class PDFProcessor:
         for d in documents:
             d.metadata['file_path'] = pdf_path
         return documents
+    #chunking!
     @staticmethod
     def chunk_documents(documents: List[Document]) -> List[Document]:
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
-        splitter = SemanticChunker(embeddings=embeddings, chunk_size=800)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
         return splitter.split_documents(documents)
 
 # PDF 인덱스 생성 함수
@@ -145,50 +144,75 @@ class RAGSystem:
 
         return answer
 
+# 메인 함수
 def main():
     st.set_page_config(page_title="디지털경영전공 챗봇", layout="wide")
     st.title("🎓 디지털경영전공 챗봇")
     st.caption("학과에 대한 다양한 질문에 친절하게 답변해드립니다.")
 
-    if "step" not in st.session_state:
-        st.session_state.step = "init"
+    #이 버튼 클릭 시 PDF 인덱스 생성
+    if st.button("📥 채팅 시작 !"):
+        generate_faiss_index()
+
+    # 세션 상태 초기화 (대화 로그 저장)
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # 🎯 사이드바: 버튼 이동 및 설정
-    with st.sidebar:
-        st.header("📂 설정")
-        if st.button("📥 채팅 시작 !"):
-            generate_faiss_index()
-            st.toast("PDF 인덱스 생성 완료!", icon="✅")
-            st.session_state.step = "chat"
-            st.rerun()
+    #페이지 3단구성
+    left_col, mid_col, right_col = st.columns([1, 2.5, 1.2])
 
-        st.divider()
-        st.markdown("🧾 [디지털경영전공 홈페이지](https://example.com)")
-        st.markdown("📞 학과 사무실: 044-860-1560")
+    #left : 사용 가이드
+    with left_col:
+        st.subheader("📚 사용 가이드")
+        st.markdown("""
+        - '📥 채팅 시작 !' 버튼을 눌러주세요.<br>
+        - 궁금한 내용을 입력하시면 관련 정보를 PDF 기반으로 안내해드립니다.<br>
+        - 추가 문의는 디지털경영전공 홈페이지 또는 학과 사무실(044-860-1560)로 연락 바랍니다.
+        """, unsafe_allow_html=True)
 
-    # 단계 분기
-    if st.session_state.step == "init":
-        st.info("📥 채팅 시작 버튼을 눌러 챗봇을 활성화하세요!")
-
-    elif st.session_state.step == "chat":
-        # 채팅 출력
+    #mid : 채팅 기록 표시 및 입력
+    with mid_col:
         for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+            if msg["role"] == "user":
+                st.markdown(f"""
+                <div style='background-color: #731034; padding: 10px; border-radius: 20px; margin-bottom: 10px; color: white; max-width: 70%; box-shadow: 0px 2px 5px rgba(0,0,0,0.1);'>
+                💬 <b>질문:</b> {msg["content"]}
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div style='background-color: #f8f8f8; padding: 10px; border-radius: 20px; margin-bottom: 10px; margin-left: auto; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); max-width: 70%;'>
+                🤖 <b>답변:</b> {msg["content"]}
+                </div>""", unsafe_allow_html=True)
 
-        # 사용자 입력 처리
-        user_input = st.chat_input("궁금한 점을 입력해 주세요.")
-        if user_input:
-            st.session_state.messages.append({"role": "user", "content": user_input})
+        #사용자 질문 입력 및 처리
+        prompt = st.chat_input("궁금한 점을 입력해 주세요.")
+        if prompt:
+            st.session_state.messages.append({"role": "user", "content": prompt})
             rag = RAGSystem(st.secrets["openai"]["API_KEY"])
 
             with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요."):
-                answer = rag.process_question(user_input)
+                answer = rag.process_question(prompt)
 
             st.session_state.messages.append({"role": "assistant", "content": answer})
             st.rerun()
+
+    # right : 피드백 및 최근 질문
+    with right_col:
+        st.subheader("📢 개발자에게 의견 보내기")
+        feedback_input = st.text_area("챗봇에 대한 개선 의견이나 하고 싶은 말을 남겨주세요.")
+        if st.button("피드백 제출"):
+            if feedback_input.strip() != "":
+                with open("feedback_log.csv", mode="a", encoding="utf-8-sig", newline="") as file:
+                    writer = csv.writer(file)
+                    writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), feedback_input])
+                st.success("소중한 의견 감사합니다.")
+                st.rerun()
+            else:
+                st.warning("피드백 내용을 입력해 주세요.")
+
+        st.subheader("📝 최근 질문 히스토리")
+        for i, q in enumerate([m["content"] for m in st.session_state.messages if m["role"] == "user"][-5:], 1):
+            st.markdown(f"{i}. {q}")
 
 #streamlit 앱 실행 시작
 if __name__ == "__main__":
