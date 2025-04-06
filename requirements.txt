@@ -7,3 +7,4 @@ faiss-cpu
 pymupdf
 tiktoken
 python-dotenv
+langsmith
