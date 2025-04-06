@@ -13,14 +13,10 @@ import os
 import csv
 import time
 
-# LangSmith 관련 패키지 추가
-from langsmith import Client
-import os
-from langchain.callbacks.tracers.langchain import LangChainTracer
-from langchain.callbacks.manager import CallbackManager
-from langchain.smith import RunEvalConfig
+# LangSmith 관련 패키지 추가 (수정된 부분)
 from langchain.callbacks.tracers import LangChainTracer
-from langsmith.evaluation import EvaluationResult
+from langchain.callbacks.manager import CallbackManager
+from langsmith import Client
 
 # API 키 로드
 time.sleep(1)
@@ -28,6 +24,7 @@ api_key = st.secrets["openai"]["API_KEY"]
 
 # LangSmith API 키 및 프로젝트 설정
 os.environ["LANGCHAIN_TRACING_V2"] = "true"  # LangSmith 추적 활성화
+os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"  # LangSmith 엔드포인트 명시
 os.environ["LANGCHAIN_API_KEY"] = st.secrets["langsmith"]["API_KEY"]  # LangSmith API 키
 os.environ["LANGCHAIN_PROJECT"] = "디지털경영전공_챗봇"  # 프로젝트 이름 설정
 
@@ -74,21 +71,23 @@ def generate_faiss_index():
     vector_store.save_local("faiss_index_internal")
     st.success(f"{len(pdf_files)}개의 PDF 파일로 인덱스 생성이 완료되었습니다.")
 
-#RAG (LangSmith 통합)
+#RAG (LangSmith 통합 - 수정됨)
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
         
-        # LangSmith 트레이서 설정
-        self.tracer = LangChainTracer(project_name=os.environ["LANGCHAIN_PROJECT"])
-        self.callback_manager = CallbackManager([self.tracer])
-
-        # LLM 초기화 (콜백 매니저 추가)
+        # LangSmith 클라이언트 초기화
+        self.langsmith_client = Client()
+        
+        # 단순화된 콜백 매니저 설정
+        callbacks = []  # 콜백 리스트는 비워두고 필요할 때 매개변수로 전달
+        
+        # LLM 초기화 (tags 추가)
         self.llm = ChatOpenAI(
             model="gpt-4o", 
             openai_api_key=self.api_key, 
             temperature=0,
-            callback_manager=self.callback_manager
+            tags=["디지털경영전공_챗봇", "llm_call"]  # 태그 추가
         )
         
         # 대화 요약 메모리 추가
@@ -103,9 +102,6 @@ class RAGSystem:
 
         # RAG chain 구성
         self.rag_chain = self.get_rag_chain()
-        
-        # LangSmith 클라이언트 초기화
-        self.langsmith_client = Client()
 
     # vector DB 불러오기 (변경 없음)
     @st.cache_resource
@@ -113,7 +109,7 @@ class RAGSystem:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_self.api_key)
         return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
 
-    # prompt template 구성 + RAG chain 구성 (트레이서 추가)
+    # prompt template 구성 + RAG chain 구성 (태그 추가 방식 수정)
     def get_rag_chain(self) -> Runnable:
         template = """
         아래 컨텍스트와 대화 기록을 바탕으로 질문에 답변해 주세요:
@@ -143,15 +139,15 @@ class RAGSystem:
         prompt = PromptTemplate.from_template(template)
         chain = prompt | self.llm | StrOutputParser()
         
-        # 체인에 태그 추가 (LangSmith에서 조회할 때 유용)
-        chain.with_config(tags=["디지털경영전공_챗봇", "학과_정보"])
+        # 체인에 태그 추가 - with_config 대신 메타데이터 추가 방식 사용
+        chain = chain.with_config({"tags": ["디지털경영전공_챗봇", "rag_chain"]})
         
         return chain
 
-    # 사용자의 질문을 처리하고 답변 반환 (LangSmith 추적 기능 추가)
+    # 사용자의 질문을 처리하고 답변 반환 (수정된 LangSmith 추적 방식)
     def process_question(self, question: str) -> str:
-        # LangSmith Run 추적 시작
-        with self.tracer.capture_run(run_type="chain", name="디지털경영전공_챗봇_질의응답") as run:
+        # 간소화된 추적 방식 - try/except 추가로 오류 포착
+        try:
             # 관련 문서 검색
             vector_db = self.get_vector_db()
             retriever = vector_db.as_retriever(search_kwargs={"k": 7})
@@ -160,25 +156,36 @@ class RAGSystem:
             # 대화 기록 요약 불러오기
             history_summary = self.memory.load_memory_variables({})['history']
 
-            # LLM 호출
-            answer = self.rag_chain.invoke({
-                "question": question,
-                "context": docs,
-                "history": history_summary,
-            })
+            # LLM 호출 - run_name 추가하여 추적 가능하게 함
+            answer = self.rag_chain.invoke(
+                {
+                    "question": question,
+                    "context": docs,
+                    "history": history_summary,
+                },
+                config={
+                    "run_name": "디지털경영전공_챗봇_질의응답",
+                    "metadata": {"question_text": question}
+                }
+            )
 
             # 대화 내용을 memory에 저장
             self.memory.save_context({"input": question}, {"output": answer})
             
-            # LangSmith에 결과 기록
-            run.end(outputs={"answer": answer})
-            
-            # 간단한 평가 실행 (선택사항)
-            self.evaluate_response(question, answer)
-            
+            # 선택적으로 평가 실행 - 오류 발생해도 사용자 경험에 영향 없도록
+            try:
+                self.evaluate_response(question, answer)
+            except:
+                pass  # 평가 실패해도 계속 진행
+                
             return answer
             
-    # 응답 평가 메서드 (LangSmith 평가 기능)
+        except Exception as e:
+            # 오류 발생 시 사용자에게 안내
+            st.error(f"질문 처리 중 오류가 발생했습니다: {str(e)}")
+            return "죄송합니다. 질문을 처리하는 도중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+            
+    # 응답 평가 메서드 (단순화된 버전)
     def evaluate_response(self, question: str, answer: str):
         try:
             # 간단한 평가 실행 - 답변의 품질을 평가하는 프롬프트
@@ -199,22 +206,14 @@ class RAGSystem:
             """
             
             # 평가 실행
-            score = eval_chain.invoke(eval_prompt)
+            score = eval_chain.invoke(eval_prompt, config={"tags": ["평가", "quality_check"]})
+            score_value = float(score.strip()) if score.strip().replace('.', '', 1).isdigit() else 5.0
             
-            # LangSmith에 평가 결과 저장
-            self.langsmith_client.create_evaluation(
-                evaluation_name="답변_품질_점수",
-                value=float(score) if score.strip().isdigit() else 5.0,  # 기본값 5점
-                evaluation_type="qa_score",
-                source={
-                    "question": question,
-                    "answer": answer
-                },
-                target_run_id=self.tracer.run_id  # 현재 추적 중인 실행의 ID
-            )
+            # 간단한 로깅만 수행 (에러 방지)
+            print(f"응답 품질 점수: {score_value}/10")
+            
         except Exception as e:
-            # 평가 과정에서 오류가 있어도 사용자 경험에 영향을 주지 않도록 함
-            print(f"평가 오류: {e}")
+            print(f"평가 중 오류 발생: {e}")
             pass
 
 # 메인 함수 (대부분 변경 없음)
@@ -267,12 +266,18 @@ def main():
         prompt = st.chat_input("궁금한 점을 입력해 주세요.")
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
-            rag = RAGSystem(st.secrets["openai"]["API_KEY"])
-
-            with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요."):
-                answer = rag.process_question(prompt)
-
-            st.session_state.messages.append({"role": "assistant", "content": answer})
+            
+            # 오류 처리 추가
+            try:
+                rag = RAGSystem(st.secrets["openai"]["API_KEY"])
+                with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요."):
+                    answer = rag.process_question(prompt)
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+            except Exception as e:
+                error_msg = "죄송합니다. 시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                st.error(f"오류 발생: {str(e)}")
+            
             st.rerun()
 
     # right : 피드백 및 최근 질문
@@ -285,20 +290,8 @@ def main():
                     writer = csv.writer(file)
                     writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), feedback_input])
                 
-                # LangSmith에 피드백 저장 (선택사항)
-                if "rag" in locals():
-                    try:
-                        rag.langsmith_client.create_dataset(
-                            dataset_name="사용자_피드백",
-                            description="사용자로부터 받은 피드백"
-                        )
-                        rag.langsmith_client.create_example(
-                            dataset_name="사용자_피드백",
-                            inputs={},
-                            outputs={"feedback": feedback_input, "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')}
-                        )
-                    except:
-                        pass  # 이미 데이터셋이 존재하는 경우 에러 방지
+                # 간단한 피드백 로깅만 수행 (에러 방지)
+                print(f"사용자 피드백 접수: {feedback_input}")
                 
                 st.success("소중한 의견 감사합니다.")
                 st.rerun()
