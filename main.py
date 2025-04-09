@@ -4,18 +4,16 @@ from langchain_core.documents.base import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableMap, RunnableLambda
 from langchain.schema.output_parser import StrOutputParser
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.memory import ConversationSummaryMemory
-from typing import List, Tuple
+from typing import List
 import os
 import csv
 import time
 
-# LangSmith 관련 패키지 추가 (수정된 부분)
-from langchain.callbacks.tracers import LangChainTracer
-from langchain.callbacks.manager import CallbackManager
+# LangSmith 관련 패키지
 from langsmith import Client
 
 # API 키 로드
@@ -23,14 +21,13 @@ time.sleep(1)
 api_key = st.secrets["openai"]["API_KEY"]
 
 # LangSmith API 키 및 프로젝트 설정
-os.environ["LANGCHAIN_TRACING_V2"] = "true"  # LangSmith 추적 활성화
-os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"  # LangSmith 엔드포인트 명시
-os.environ["LANGCHAIN_API_KEY"] = st.secrets["langsmith"]["API_KEY"]  # LangSmith API 키
-os.environ["LANGCHAIN_PROJECT"] = "디지털경영전공_챗봇"  # 프로젝트 이름 설정
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGCHAIN_API_KEY"] = st.secrets["langsmith"]["API_KEY"]
+os.environ["LANGCHAIN_PROJECT"] = "디지털경영전공_챗봇"
 
-# PDF 처리 클래스 정의 (변경 없음)
+# PDF 처리 클래스
 class PDFProcessor:
-    #PDF를 문서 list로 변환
     @staticmethod
     def pdf_to_documents(pdf_path: str) -> List[Document]:
         loader = PyMuPDFLoader(pdf_path)
@@ -38,17 +35,17 @@ class PDFProcessor:
         for d in documents:
             d.metadata['file_path'] = pdf_path
         return documents
-    #chunking!
+
     @staticmethod
     def chunk_documents(documents: List[Document]) -> List[Document]:
         splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
         return splitter.split_documents(documents)
 
-# PDF 인덱스 생성 함수 (변경 없음)
+# PDF 인덱스 생성
 def generate_faiss_index():
     pdf_dir = "data/"
     all_documents = []
-    
+
     if not os.path.exists(pdf_dir):
         os.makedirs(pdf_dir)
         st.warning("data/ 폴더가 생성되었습니다. PDF 파일을 여기에 넣고 다시 실행해주세요.")
@@ -59,40 +56,31 @@ def generate_faiss_index():
         st.error("data/ 폴더에 PDF 파일이 없습니다. PDF를 추가한 후 다시 실행해주세요.")
         return
 
-    #PDF 파일 문서화
     for file_name in pdf_files:
         docs = PDFProcessor.pdf_to_documents(os.path.join(pdf_dir, file_name))
         all_documents.extend(docs)
 
-    #문서 chunking, vector embedding 생성, 인덱싱
     chunks = PDFProcessor.chunk_documents(all_documents)
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     vector_store = FAISS.from_documents(chunks, embeddings)
     vector_store.save_local("faiss_index_internal")
     st.success(f"{len(pdf_files)}개의 PDF 파일로 인덱스 생성이 완료되었습니다.")
 
-#RAG (LangSmith 통합 - 수정됨)
+# RAG 시스템
 class RAGSystem:
     def __init__(self, api_key: str):
         self.api_key = api_key
-        
-        # LangSmith 클라이언트 초기화
         self.langsmith_client = Client()
-        
-        # 단순화된 콜백 매니저 설정
-        callbacks = []  # 콜백 리스트는 비워두고 필요할 때 매개변수로 전달
-        
-        # LLM 초기화 (tags 추가)
+
         self.llm = ChatOpenAI(
-            model="gpt-4o", 
-            openai_api_key=self.api_key, 
+            model="gpt-4o",
+            openai_api_key=self.api_key,
             temperature=0,
-            tags=["디지털경영전공_챗봇", "llm_call"]  # 태그 추가
+            tags=["디지털경영전공_챗봇", "llm_call"]
         )
-        
-        # 대화 요약 메모리 추가
+
         self.memory = ConversationSummaryMemory(
-            llm=self.llm, 
+            llm=self.llm,
             return_messages=True,
             max_token_limit=300,
             memory_key="history",
@@ -100,20 +88,16 @@ class RAGSystem:
             output_key="output"
         )
 
-        # RAG chain 구성
         self.rag_chain = self.get_rag_chain()
 
-    # vector DB 불러오기 (변경 없음)
     @st.cache_resource
     def get_vector_db(_self):
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_self.api_key)
         return FAISS.load_local("faiss_index_internal", embeddings, allow_dangerous_deserialization=True)
 
-    # prompt template 구성 + RAG chain 구성 (태그 추가 방식 수정)
     def get_rag_chain(self) -> Runnable:
         template = """
         아래 컨텍스트와 대화 기록을 바탕으로 질문에 답변해 주세요:
-
         1. 답변은 최대 4문장 이내로 간결하고 명확하게 작성합니다.
         2. 중요한 내용은 핵심만 요약해서 전달합니다.
         3. 답변이 어려우면 "잘 모르겠습니다."라고 정중히 답변합니다.
@@ -130,33 +114,34 @@ class RAGSystem:
         14. 같은 말을 반복하지 마세요
 
         이전 대화 요약: {history}
-        
         컨텍스트: {context}
         질문: {question}
 
         답변:
         """
         prompt = PromptTemplate.from_template(template)
-        chain = prompt | self.llm | StrOutputParser()
-        
-        # 체인에 태그 추가 - with_config 대신 메타데이터 추가 방식 사용
-        chain = chain.with_config({"tags": ["디지털경영전공_챗봇", "rag_chain"]})
-        
-        return chain
 
-    # 사용자의 질문을 처리하고 답변 반환 (수정된 LangSmith 추적 방식)
+        def retrieve_context(inputs: dict):
+            vector_db = self.get_vector_db()
+            retriever = vector_db.as_retriever(search_kwargs={"k": 7})
+            return retriever.invoke(inputs["question"])
+
+        return RunnableMap({
+            "question": lambda x: x["question"],
+            "context": RunnableLambda(retrieve_context).with_config(tags=["retriever"]),
+            "history": lambda x: x["history"]
+        }) | prompt.with_config(tags=["prompt"]) \
+          | self.llm.with_config(tags=["llm"]) \
+          | StrOutputParser().with_config(tags=["output_parser"]) \
+          .with_config(tags=["디지털경영전공_챗봇", "rag_chain"], run_name="디지털경영전공_RAG_전체체인")
+
     def process_question(self, question: str) -> str:
-        # 간소화된 추적 방식 - try/except 추가로 오류 포착
         try:
-            # 관련 문서 검색
             vector_db = self.get_vector_db()
             retriever = vector_db.as_retriever(search_kwargs={"k": 7})
             docs = retriever.invoke(question)
-
-            # 대화 기록 요약 불러오기
             history_summary = self.memory.load_memory_variables({})['history']
 
-            # LLM 호출 - run_name 추가하여 추적 가능하게 함
             answer = self.rag_chain.invoke(
                 {
                     "question": question,
@@ -169,77 +154,62 @@ class RAGSystem:
                 }
             )
 
-            # 대화 내용을 memory에 저장
             self.memory.save_context({"input": question}, {"output": answer})
-            
-            # 선택적으로 평가 실행 - 오류 발생해도 사용자 경험에 영향 없도록
+
             try:
                 self.evaluate_response(question, answer)
             except:
-                pass  # 평가 실패해도 계속 진행
-                
+                pass
+
             return answer
-            
+
         except Exception as e:
-            # 오류 발생 시 사용자에게 안내
             st.error(f"질문 처리 중 오류가 발생했습니다: {str(e)}")
             return "죄송합니다. 질문을 처리하는 도중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-            
-    # 응답 평가 메서드 (단순화된 버전)
+
     def evaluate_response(self, question: str, answer: str):
         try:
-            # 간단한 평가 실행 - 답변의 품질을 평가하는 프롬프트
             eval_chain = ChatOpenAI(
                 model="gpt-4o",
                 openai_api_key=self.api_key,
                 temperature=0
             ) | StrOutputParser()
-            
+
             eval_prompt = f"""
             다음 질문과 답변의 품질을 1-10점 사이로 평가해주세요:
-            
+
             질문: {question}
             답변: {answer}
-            
-            답변이 질문에 얼마나 잘 대답했는지, 답변이 얼마나 명확하고 정확한지 평가해주세요.
+
             점수만 숫자로 반환해주세요.
             """
-            
-            # 평가 실행
             score = eval_chain.invoke(eval_prompt, config={"tags": ["평가", "quality_check"]})
             score_value = float(score.strip()) if score.strip().replace('.', '', 1).isdigit() else 5.0
-            
-            # 간단한 로깅만 수행 (에러 방지)
             print(f"응답 품질 점수: {score_value}/10")
-            
+
         except Exception as e:
             print(f"평가 중 오류 발생: {e}")
             pass
 
-# 메인 함수 (대부분 변경 없음)
+# Streamlit 메인 앱
 def main():
     st.set_page_config(page_title="디지털경영전공 챗봇", layout="wide")
     st.title("🎓 디지털경영전공 챗봇")
     st.caption("학과에 대한 다양한 질문에 친절하게 답변해드립니다.")
 
-    # LangSmith 대시보드 링크 추가
     if st.sidebar.checkbox("개발 모드 보기"):
         st.sidebar.markdown("### LangSmith 대시보드")
         st.sidebar.markdown("[대시보드 열기](https://smith.langchain.com)")
         st.sidebar.info("LangSmith 대시보드에서 챗봇의 동작과 성능을 모니터링할 수 있습니다.")
 
-    #이 버튼 클릭 시 PDF 인덱스 생성
     if st.button("📥 채팅 시작 !"):
         generate_faiss_index()
 
-    # 세션 상태 초기화 (대화 로그 저장)
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    #페이지 3단구성
     left_col, mid_col, right_col = st.columns([1, 2.5, 1.2])
 
-    #left : 사용 가이드
     with left_col:
         st.subheader("📚 사용 가이드")
         st.markdown("""
@@ -248,7 +218,6 @@ def main():
         - 추가 문의는 디지털경영전공 홈페이지 또는 학과 사무실(044-860-1560)로 연락 바랍니다.
         """, unsafe_allow_html=True)
 
-    #mid : 채팅 기록 표시 및 입력
     with mid_col:
         for msg in st.session_state.messages:
             if msg["role"] == "user":
@@ -262,12 +231,9 @@ def main():
                 🤖 <b>답변:</b> {msg["content"]}
                 </div>""", unsafe_allow_html=True)
 
-        #사용자 질문 입력 및 처리
         prompt = st.chat_input("궁금한 점을 입력해 주세요.")
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            # 오류 처리 추가
             try:
                 rag = RAGSystem(st.secrets["openai"]["API_KEY"])
                 with st.spinner("질문을 이해하는 중입니다. 잠시만 기다려주세요."):
@@ -277,10 +243,8 @@ def main():
                 error_msg = "죄송합니다. 시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
                 st.error(f"오류 발생: {str(e)}")
-            
             st.rerun()
 
-    # right : 피드백 및 최근 질문
     with right_col:
         st.subheader("📢 개발자에게 의견 보내기")
         feedback_input = st.text_area("챗봇에 대한 개선 의견이나 하고 싶은 말을 남겨주세요.")
@@ -289,10 +253,6 @@ def main():
                 with open("feedback_log.csv", mode="a", encoding="utf-8-sig", newline="") as file:
                     writer = csv.writer(file)
                     writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), feedback_input])
-                
-                # 간단한 피드백 로깅만 수행 (에러 방지)
-                print(f"사용자 피드백 접수: {feedback_input}")
-                
                 st.success("소중한 의견 감사합니다.")
                 st.rerun()
             else:
@@ -302,6 +262,6 @@ def main():
         for i, q in enumerate([m["content"] for m in st.session_state.messages if m["role"] == "user"][-5:], 1):
             st.markdown(f"{i}. {q}")
 
-#streamlit 앱 실행 시작
+# 앱 실행
 if __name__ == "__main__":
     main()
